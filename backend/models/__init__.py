@@ -1,5 +1,6 @@
 # backend/models/__init__.py
 # backend/models/__init__.py
+from backend.models.user_event import UserEvent
 
 from backend.models.user import User
 from backend.models.article import NewsArticle
@@ -13,4 +14,5 @@ __all__ = [
     "UserPreferences",
     "ScraperRun",
     "DigestLog",
+    "UserEvent",
 ]

@@ -25,16 +25,24 @@ async def send_digest_to_user(user_id: str):
         user = result.scalar_one_or_none()
 
         if not user:
-            logger.warning(f"User not found: {user_id}")
+            logger.warning(
+                f"User not found: {user_id}"
+            )
             return
 
-        if not user.is_active or not user.is_verified:
-            logger.warning(f"User not allowed: {user.email}")
+        if (
+            not user.is_active
+            or not user.is_verified
+        ):
+            logger.warning(
+                f"User not allowed: {user.email}"
+            )
             return
 
         prefs_result = await db.execute(
             select(UserPreferences).where(
-                UserPreferences.user_id == user.id
+                UserPreferences.user_id
+                == user.id
             )
         )
 
@@ -43,10 +51,16 @@ async def send_digest_to_user(user_id: str):
         sources = prefs.sources if prefs else []
         topics = prefs.topics if prefs else []
         top_n = prefs.top_n if prefs else 10
-        email_enabled = prefs.email_enabled if prefs else True
+        email_enabled = (
+            prefs.email_enabled
+            if prefs
+            else True
+        )
 
         if not email_enabled:
-            logger.info(f"Email disabled for {user.email}")
+            logger.info(
+                f"Email disabled for {user.email}"
+            )
             return
 
         history_result = await db.execute(
@@ -62,9 +76,14 @@ async def send_digest_to_user(user_id: str):
 
         for log in logs:
             if log.article_ids:
-                sent_article_ids.update(log.article_ids)
+                sent_article_ids.update(
+                    log.article_ids
+                )
 
-        since = datetime.now(timezone.utc) - timedelta(days=3)
+        since = (
+            datetime.now(timezone.utc)
+            - timedelta(days=3)
+        )
 
         filters = [
             NewsArticle.scraped_at >= since
@@ -78,14 +97,20 @@ async def send_digest_to_user(user_id: str):
         result = await db.execute(
             select(NewsArticle)
             .where(and_(*filters))
-            .order_by(desc(NewsArticle.final_rank_score))
+            .order_by(
+                desc(
+                    NewsArticle.final_rank_score
+                )
+            )
             .limit(top_n * 10)
         )
 
         articles = result.scalars().all()
 
         if not articles:
-            logger.warning(f"No recent articles for {user.email}")
+            logger.warning(
+                f"No recent articles for {user.email}"
+            )
             return
 
         ranked_articles = rank_articles(
@@ -94,46 +119,50 @@ async def send_digest_to_user(user_id: str):
             user_sources=sources,
         )
 
-        fresh_articles = [
-            article
-            for article in ranked_articles
-            if str(article.id) not in sent_article_ids
-        ]
+        fresh_articles = ranked_articles
 
         top_articles = fresh_articles[:top_n]
 
         if not top_articles:
-            logger.warning(f"No new articles to send for {user.email}")
+            logger.warning(
+                f"No new articles to send for {user.email}"
+            )
             return
 
         article_dicts = []
 
-        for index, article in enumerate(top_articles):
+        for index, article in enumerate(
+            top_articles
+        ):
             short_summary = summarize_article(
                 article.title,
-                article.summary or article.title,
+                article.summary
+                or article.title,
             )
 
-            article_dicts.append({
-                "rank": index + 1,
-                "personalized_score": getattr(
-                    article,
-                    "personalized_score",
-                    article.final_rank_score or 0,
-                ),
-                "id": str(article.id),
-                "title": article.title,
-                "url": article.url,
-                "summary": short_summary,
-                "source": article.source,
-                "source_name": article.source_name,
-                "topics": article.topics,
-                "published_at": (
-                    article.published_at.isoformat()
-                    if article.published_at
-                    else None
-                ),
-            })
+            article_dicts.append(
+                {
+                    "rank": index + 1,
+                    "personalized_score": getattr(
+                        article,
+                        "personalized_score",
+                        article.final_rank_score
+                        or 0,
+                    ),
+                    "id": str(article.id),
+                    "title": article.title,
+                    "url": article.url,
+                    "summary": short_summary,
+                    "source": article.source,
+                    "source_name": article.source_name,
+                    "topics": article.topics,
+                    "published_at": (
+                        article.published_at.isoformat()
+                        if article.published_at
+                        else None
+                    ),
+                }
+            )
 
         log = DigestLog(
             user_id=user.id,
@@ -149,8 +178,9 @@ async def send_digest_to_user(user_id: str):
 
         try:
             await send_digest_email(
-                user.email,
-                article_dicts,
+                email=user.email,
+                articles=article_dicts,
+                user_id=str(user.id),
             )
 
             log.status = "sent"
@@ -165,7 +195,8 @@ async def send_digest_to_user(user_id: str):
             log.error_message = str(e)
 
             logger.error(
-                f"Failed sending digest to {user.email}: {e}"
+                f"Failed sending digest to "
+                f"{user.email}: {e}"
             )
 
         await db.commit()
@@ -174,17 +205,24 @@ async def send_digest_to_user(user_id: str):
 async def send_daily_digests():
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(User).where(User.is_active == True)
+            select(User).where(
+                User.is_active == True
+            )
         )
 
         users = result.scalars().all()
 
-    logger.info(f"Sending digests to {len(users)} users")
+    logger.info(
+        f"Sending digests to {len(users)} users"
+    )
 
     for user in users:
         try:
-            await send_digest_to_user(str(user.id))
+            await send_digest_to_user(
+                str(user.id)
+            )
         except Exception as e:
             logger.error(
-                f"Error sending digest to {user.email}: {e}"
+                f"Error sending digest to "
+                f"{user.email}: {e}"
             )

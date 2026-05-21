@@ -9,6 +9,7 @@ from backend.routers import auth
 from backend.routers import users
 from backend.routers import news
 from backend.routers import digest
+from backend.routers import events
 
 from backend.services.scheduler import (
     start_scheduler,
@@ -108,6 +109,12 @@ app.include_router(
     prefix="/api/digest",
     tags=["Digest"],
 )
+app.include_router(
+    events.router,
+    prefix="/api/events",
+    tags=["Events"],
+)
+
 
 
 # =========================================================

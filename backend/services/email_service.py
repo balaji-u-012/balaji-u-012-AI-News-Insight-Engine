@@ -1,6 +1,6 @@
 """
 Email service — sends verification emails and daily digest emails.
-Uses SMTP + Groq AI title shortening.
+Read More opens direct original article links only.
 """
 
 import os
@@ -10,7 +10,6 @@ import asyncio
 import html as html_escape
 
 from groq import Groq
-
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -18,95 +17,117 @@ from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-# =====================================
-# LOAD .ENV
-# =====================================
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 ENV_PATH = BASE_DIR / ".env"
-
 load_dotenv(ENV_PATH)
 
 logger = logging.getLogger(__name__)
 
-# =====================================
-# ENV CONFIG
-# =====================================
-
-SMTP_HOST = os.getenv(
-    "SMTP_HOST",
-    "smtp.gmail.com"
-)
-
-SMTP_PORT = int(
-    os.getenv("SMTP_PORT", "587")
-)
-
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
-
-GROQ_API_KEY = os.getenv(
-    "GROQ_API_KEY"
-)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 FROM_EMAIL = os.getenv(
     "FROM_EMAIL",
-    f"AI Digest <{SMTP_USER}>"
+    f"AI Digest <{SMTP_USER}>",
 )
 
 APP_URL = os.getenv(
     "APP_URL",
-    "http://localhost:5173"
+    "http://localhost:5173",
 )
 
 if not SMTP_USER or not SMTP_PASS:
-    raise RuntimeError(
-        "SMTP credentials missing"
+    raise RuntimeError("SMTP credentials missing")
+
+
+def get_original_url(article: dict) -> str:
+    url_fields = [
+        "url",
+        "link",
+        "article_url",
+        "source_url",
+        "original_url",
+        "web_url",
+        "html_url",
+        "direct_url",
+        "canonical_url",
+        "youtube_url",
+        "video_url",
+        "reddit_url",
+        "permalink",
+        "href",
+        "source_link",
+        "external_url",
+    ]
+
+    for key in url_fields:
+        value = article.get(key)
+
+        if not value:
+            continue
+
+        value = str(value).strip()
+
+        if (
+            not value
+            or value.lower() in ["none", "null", "#"]
+        ):
+            continue
+
+        if value.startswith(("http://", "https://")):
+            return value
+
+        if value.startswith("www."):
+            return "https://" + value
+
+        if key == "permalink" and value.startswith("/"):
+            return "https://www.reddit.com" + value
+
+        if "." in value and " " not in value:
+            return "https://" + value
+
+    print(
+        "⚠️ No valid URL found for:",
+        article.get("title", "Unknown"),
     )
 
-# =====================================
-# CORE EMAIL SENDER
-# =====================================
+    return "#"
 
 
 def _send_email_sync(
     to: str,
     subject: str,
     html: str,
-    text: str = ""
+    text: str = "",
 ):
     msg = MIMEMultipart("alternative")
-
     msg["Subject"] = subject
     msg["From"] = FROM_EMAIL
     msg["To"] = to
 
     if text:
-        msg.attach(
-            MIMEText(text, "plain")
-        )
+        msg.attach(MIMEText(text, "plain"))
 
-    msg.attach(
-        MIMEText(html, "html")
-    )
+    msg.attach(MIMEText(html, "html"))
 
     with smtplib.SMTP(
         SMTP_HOST,
-        SMTP_PORT
+        SMTP_PORT,
     ) as server:
-
         server.ehlo()
         server.starttls()
-
         server.login(
             SMTP_USER,
-            SMTP_PASS
+            SMTP_PASS,
         )
-
         server.sendmail(
             SMTP_USER,
             to,
-            msg.as_string()
+            msg.as_string(),
         )
 
     print(f"✅ Email sent to {to}")
@@ -116,7 +137,7 @@ async def send_email(
     to: str,
     subject: str,
     html: str,
-    text: str = ""
+    text: str = "",
 ):
     try:
         await asyncio.to_thread(
@@ -124,7 +145,7 @@ async def send_email(
             to,
             subject,
             html,
-            text
+            text,
         )
 
         logger.info(
@@ -135,48 +156,45 @@ async def send_email(
         logger.error(
             f"Failed to send email: {e}"
         )
-
         raise
 
-# =====================================
-# TITLE SHORTENER
-# =====================================
 
-
-def shorten_title_with_groq(
-    title: str
-) -> str:
+def shorten_title_with_groq(title: str) -> str:
+    if not GROQ_API_KEY:
+        return (
+            title[:80] + "..."
+            if len(title) > 80
+            else title
+        )
 
     try:
         client = Groq(
-            api_key=GROQ_API_KEY
+            api_key=GROQ_API_KEY,
         )
 
-        response = (
-            client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "Shorten this AI news title "
-                            "for a premium email digest. "
-                            "Keep it professional, clean "
-                            "and under 8 words. "
-                            "Return ONLY the title."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": title,
-                    },
-                ],
-                temperature=0.2,
-                max_tokens=24,
-            )
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Shorten this AI news title "
+                        "for a premium email digest. "
+                        "Keep it professional, clean "
+                        "and under 8 words. "
+                        "Return ONLY the title."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": title,
+                },
+            ],
+            temperature=0.2,
+            max_tokens=24,
         )
 
-        short_title = (
+        return (
             response
             .choices[0]
             .message
@@ -184,31 +202,23 @@ def shorten_title_with_groq(
             .strip()
         )
 
-        return short_title
-
     except Exception as e:
-
         logger.warning(
             f"Groq title shortening failed: {e}"
         )
 
-        if len(title) > 80:
-            return title[:80] + "..."
-
-        return title
-
-# =====================================
-# VERIFICATION EMAIL
-# =====================================
+        return (
+            title[:80] + "..."
+            if len(title) > 80
+            else title
+        )
 
 
 async def send_verification_email(
     email: str,
-    token: str
+    token: str,
 ):
-    verify_url = (
-        f"{APP_URL}/verify/{token}"
-    )
+    verify_url = f"{APP_URL}/verify/{token}"
 
     html = f"""
     <div style="
@@ -248,20 +258,16 @@ async def send_verification_email(
         email,
         "Verify your AI Digest account",
         html,
-        "Verify your AI Digest account"
+        "Verify your AI Digest account",
     )
-
-# =====================================
-# DIGEST EMAIL
-# =====================================
 
 
 async def send_digest_email(
     email: str,
     articles: list[dict],
-    date_str: str = None
+    user_id: str = "",
+    date_str: str = None,
 ):
-
     if not date_str:
         date_str = datetime.now(
             timezone.utc
@@ -271,23 +277,20 @@ async def send_digest_email(
 
     text_lines = [
         f"AI Digest — {date_str}",
-        ""
+        "",
     ]
 
-    for i, a in enumerate(
+    for i, article in enumerate(
         articles,
-        start=1
+        start=1,
     ):
-
         raw_title = str(
-            a.get("title")
+            article.get("title")
             or "Untitled article"
         )
 
-        short_title = (
-            shorten_title_with_groq(
-                raw_title
-            )
+        short_title = shorten_title_with_groq(
+            raw_title
         )
 
         title = html_escape.escape(
@@ -295,41 +298,42 @@ async def send_digest_email(
         )
 
         description = (
-            a.get("summary")
-            or a.get("description")
-            or a.get("content")
+            article.get("summary")
+            or article.get("description")
+            or article.get("content")
             or "No description available."
         )
 
-        description = (
-            html_escape.escape(
-                str(description)
-            )
+        description = html_escape.escape(
+            str(description)
         )
 
         if len(description) > 260:
-            description = (
-                description[:260]
-                + "..."
-            )
+            description = description[:260] + "..."
 
-        article_url = (
-            html_escape.escape(
-                str(
-                    a.get("url")
-                    or a.get("link")
-                    or "#"
-                )
-            )
+        direct_url = get_original_url(article)
+
+        print(
+            f"🔗 Article {i}: {short_title}"
+        )
+        print(
+            f"   Direct URL: {direct_url}"
         )
 
-        source_name = (
-            html_escape.escape(
-                str(
-                    a.get("source_name")
-                    or a.get("source")
-                    or "Unknown source"
-                )
+        if direct_url == "#":
+            print("   ⚠️ Skipped: no direct URL")
+            continue
+
+        safe_url = html_escape.escape(
+            direct_url,
+            quote=True,
+        )
+
+        source_name = html_escape.escape(
+            str(
+                article.get("source_name")
+                or article.get("source")
+                or "Unknown source"
             )
         )
 
@@ -389,8 +393,9 @@ async def send_digest_email(
             {description}
           </p>
 
-          <a href="{article_url}"
+          <a href="{safe_url}"
              target="_blank"
+             rel="noopener noreferrer"
              style="
              display:inline-block;
              padding:12px 18px;
@@ -401,21 +406,46 @@ async def send_digest_email(
              font-size:14px;
              font-weight:700;
              ">
-            Read More
+            Read Original Article →
           </a>
+
+          <p style="
+             font-size:11px;
+             color:#9ca3af;
+             margin-top:12px;
+             word-break:break-all;
+          ">
+            {safe_url}
+          </p>
         </div>
         """
 
-        text_lines.extend([
-            f"{i}. {short_title}",
-            f"Source: {source_name}",
-            f"Description: {description}",
-            f"Read more: {article_url}",
-            ""
-        ])
+        text_lines.extend(
+            [
+                f"{i}. {short_title}",
+                f"Source: {source_name}",
+                f"Description: {description}",
+                f"Read original: {direct_url}",
+                "",
+            ]
+        )
+
+    if not article_html:
+        print(
+            f"❌ No valid article URLs found for {email}"
+        )
+        return
 
     html = f"""
+    <!DOCTYPE html>
     <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport"
+            content="width=device-width, initial-scale=1.0">
+      <title>AI Digest - {date_str}</title>
+    </head>
+
     <body style="
         margin:0;
         font-family:Arial,Helvetica,sans-serif;
@@ -477,8 +507,7 @@ async def send_digest_email(
               font-size:15px;
               line-height:1.7;
           ">
-            Curated AI updates for
-            {date_str}
+            Curated AI updates for {date_str}
           </p>
         </div>
 
@@ -494,23 +523,12 @@ async def send_digest_email(
             font-size:13px;
             color:#6b7280;
         ">
-
           <p style="
              margin:0 0 14px 0;
           ">
             You received this because
             you subscribed to AI Digest.
           </p>
-
-          <a href="{APP_URL}/preferences"
-             style="
-             color:#111827;
-             font-weight:700;
-             text-decoration:none;
-             ">
-            Manage preferences
-          </a>
-
         </div>
       </div>
     </body>
@@ -521,5 +539,5 @@ async def send_digest_email(
         email,
         f"AI Digest — {date_str}",
         html,
-        "\n".join(text_lines)
+        "\n".join(text_lines),
     )
